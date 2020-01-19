@@ -32,6 +32,7 @@ import org.eclipse.jgit.transport.JschConfigSessionFactory;
 import org.eclipse.jgit.transport.OpenSshConfig;
 import org.eclipse.jgit.transport.SshTransport;
 import org.eclipse.jgit.transport.Transport;
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.transport.URIish;
 import org.gradle.api.GradleException;
 import org.gradle.api.logging.Logger;
@@ -113,7 +114,7 @@ public class GitVersionControlSystem implements VersionControlSystem {
 
     private Collection<Ref> getRemoteRefs(GitVersionControlSpec gitSpec, boolean tags, boolean heads) {
         try {
-            return configureTransport(Git.lsRemoteRepository()).setRemote(normalizeUri(gitSpec.getUrl())).setTags(tags).setHeads(heads).call();
+            return configureTransportAndUri(Git.lsRemoteRepository(), gitSpec.getUrl()).setRemote(normalizeUri(gitSpec.getUrl())).setTags(tags).setHeads(heads).call();
         } catch (URISyntaxException | GitAPIException e) {
             throw wrapGitCommandException("ls-remote", gitSpec.getUrl(), null, e);
         }
@@ -192,7 +193,20 @@ public class GitVersionControlSystem implements VersionControlSystem {
         return new GradleException(String.format("Could not %s from %s in %s", commandName, repoUrl, workingDir), e);
     }
 
+    private static <T extends TransportCommand<?, ?>> T configureTransportAndUri(T command, URI uri) {
+        command = configureTransport(command);
+        // Username & Password:
+        // SEE if we can get it our of the command?
+        String userInfo = uri.getUserInfo(); // TODO: Or decoded user info
+        if (userInfo != null) {
+            String creds[] = userInfo.split(":");
+            command.setCredentialsProvider(new UsernamePasswordCredentialsProvider(creds[0], creds[1]));
+        }
+        return command;
+    }
+
     private static <T extends TransportCommand<?, ?>> T configureTransport(T command) {
+        // SSH Auth:
         command.setTransportConfigCallback(new DefaultTransportConfigCallback());
         return command;
     }
@@ -205,7 +219,9 @@ public class GitVersionControlSystem implements VersionControlSystem {
                 sshTransport.setSshSessionFactory(new JschConfigSessionFactory() {
                     @Override
                     protected void configure(OpenSshConfig.Host hc, Session session) {
+                        LOGGER.info("Trying to configure SSH connections to host {}", hc);
                         // TODO: This is where the password information would go
+                        // TODO: HERE
                     }
                 });
             }
